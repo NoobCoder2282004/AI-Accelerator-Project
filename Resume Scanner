@@ -1,0 +1,949 @@
+
+# INSTALL LIBRARIES
+
+!pip install flask pdfplumber sentence-transformers -q
+
+# IMPORTS
+
+import os
+import re
+import threading
+import traceback
+import pdfplumber
+
+from flask import Flask
+from flask import request
+from flask import jsonify
+from flask import render_template
+
+from sentence_transformers import SentenceTransformer
+from sentence_transformers import util
+
+# CREATE TEMPLATE FOLDER
+
+os.makedirs("templates", exist_ok=True)
+
+# HTML FRONTEND
+
+with open("templates/index.html", "w", encoding="utf-8") as f:
+
+    f.write("""
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>AI Resume Screener</title>
+
+<link rel="preconnect"
+      href="https://fonts.googleapis.com">
+
+<link rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet">
+
+<style>
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:'Inter',sans-serif;
+    background:linear-gradient(
+        135deg,
+        #f5f7fa,
+        #e4ecf7
+    );
+
+    min-height:100vh;
+
+    display:flex;
+
+    justify-content:center;
+
+    align-items:center;
+
+    padding:40px 20px;
+}
+
+.container{
+
+    width:100%;
+
+    max-width:760px;
+
+    background:white;
+
+    border-radius:24px;
+
+    padding:42px;
+
+    box-shadow:
+        0 10px 40px rgba(0,0,0,0.08),
+        0 2px 10px rgba(0,0,0,0.04);
+}
+
+.header{
+    text-align:center;
+    margin-bottom:36px;
+}
+
+.header h1{
+
+    font-size:38px;
+
+    font-weight:700;
+
+    color:#111827;
+
+    margin-bottom:10px;
+}
+
+.header p{
+
+    color:#6b7280;
+
+    font-size:15px;
+}
+
+.upload-box{
+
+    border:2px dashed #cbd5e1;
+
+    border-radius:18px;
+
+    padding:42px 24px;
+
+    text-align:center;
+
+    background:#f8fafc;
+
+    transition:0.3s;
+
+    cursor:pointer;
+
+    position:relative;
+}
+
+.upload-box:hover{
+
+    border-color:#6366f1;
+
+    background:#eef2ff;
+}
+
+.upload-box input{
+
+    position:absolute;
+
+    inset:0;
+
+    width:100%;
+
+    height:100%;
+
+    opacity:0;
+
+    cursor:pointer;
+}
+
+.upload-icon{
+
+    font-size:48px;
+
+    margin-bottom:12px;
+}
+
+.upload-title{
+
+    font-size:18px;
+
+    font-weight:600;
+
+    color:#111827;
+
+    margin-bottom:8px;
+}
+
+.upload-sub{
+
+    color:#6b7280;
+
+    font-size:14px;
+}
+
+#fileList{
+    margin-top:18px;
+}
+
+.file-item{
+
+    background:#f3f4f6;
+
+    border-radius:10px;
+
+    padding:12px 16px;
+
+    margin-bottom:10px;
+
+    font-size:14px;
+
+    color:#374151;
+}
+
+button{
+
+    width:100%;
+
+    margin-top:24px;
+
+    padding:16px;
+
+    border:none;
+
+    border-radius:14px;
+
+    background:#111827;
+
+    color:white;
+
+    font-size:16px;
+
+    font-weight:600;
+
+    cursor:pointer;
+
+    transition:0.3s;
+}
+
+button:hover{
+
+    background:#1f2937;
+
+    transform:translateY(-1px);
+}
+
+button:disabled{
+
+    background:#9ca3af;
+
+    cursor:not-allowed;
+}
+
+#error{
+
+    color:#dc2626;
+
+    margin-top:20px;
+
+    text-align:center;
+
+    font-size:14px;
+}
+
+#results{
+    margin-top:36px;
+}
+
+.results-title{
+
+    font-size:24px;
+
+    font-weight:700;
+
+    margin-bottom:18px;
+
+    color:#111827;
+}
+
+.result-card{
+
+    border:1px solid #e5e7eb;
+
+    border-radius:18px;
+
+    padding:22px;
+
+    margin-bottom:18px;
+
+    background:#fafafa;
+
+    transition:0.3s;
+}
+
+.result-card:hover{
+
+    transform:translateY(-2px);
+
+    box-shadow:0 8px 24px rgba(0,0,0,0.06);
+}
+
+.top-row{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:center;
+
+    margin-bottom:14px;
+}
+
+.candidate-name{
+
+    font-size:20px;
+
+    font-weight:700;
+
+    color:#111827;
+}
+
+.score{
+
+    font-size:24px;
+
+    font-weight:700;
+
+    color:#4f46e5;
+}
+
+.badge{
+
+    display:inline-block;
+
+    padding:6px 14px;
+
+    border-radius:999px;
+
+    font-size:13px;
+
+    font-weight:600;
+
+    margin-top:10px;
+}
+
+.shortlisted{
+
+    background:#dcfce7;
+
+    color:#166534;
+}
+
+.maybe{
+
+    background:#fef3c7;
+
+    color:#92400e;
+}
+
+.rejected{
+
+    background:#fee2e2;
+
+    color:#991b1b;
+}
+
+.skill-box{
+
+    margin-top:16px;
+
+    padding:14px;
+
+    border-radius:12px;
+
+    background:white;
+
+    border:1px solid #e5e7eb;
+
+    font-size:14px;
+
+    line-height:1.7;
+}
+
+.meta{
+
+    color:#6b7280;
+
+    font-size:14px;
+
+    margin-top:8px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="header">
+
+        <h1>AI Resume Screener</h1>
+
+        <p>
+            Smart ATS Resume Analysis
+            with Skill Matching
+        </p>
+
+    </div>
+
+    <div class="upload-box">
+
+        <input type="file"
+               id="resumeInput"
+               multiple
+               accept=".pdf">
+
+        <div class="upload-icon">📄</div>
+
+        <div class="upload-title">
+            Upload Resume PDFs
+        </div>
+
+        <div class="upload-sub">
+            Drag & drop or click to browse
+        </div>
+
+    </div>
+
+    <div id="fileList"></div>
+
+    <button id="screenBtn"
+            onclick="uploadResumes()"
+            disabled>
+
+        Screen Resumes
+
+    </button>
+
+    <div id="error"></div>
+
+    <div id="results"></div>
+
+</div>
+
+<script>
+
+const input =
+    document.getElementById("resumeInput");
+
+const fileList =
+    document.getElementById("fileList");
+
+const button =
+    document.getElementById("screenBtn");
+
+input.addEventListener("change", () => {
+
+    const files = [...input.files];
+
+    fileList.innerHTML = files.map(file => `
+
+        <div class="file-item">
+            📎 ${file.name}
+        </div>
+
+    `).join("");
+
+    button.disabled = files.length === 0;
+});
+
+async function uploadResumes(){
+
+    const files = input.files;
+
+    const resultsDiv =
+        document.getElementById("results");
+
+    const errorDiv =
+        document.getElementById("error");
+
+    resultsDiv.innerHTML = "";
+
+    errorDiv.innerHTML = "";
+
+    if(files.length === 0){
+
+        errorDiv.innerHTML =
+            "Please upload at least one PDF.";
+
+        return;
+    }
+
+    const formData = new FormData();
+
+    for(let file of files){
+
+        formData.append("resumes", file);
+    }
+
+    button.innerHTML = "Screening...";
+
+    try{
+
+        const response = await fetch(
+
+            window.location.origin + "/screen",
+
+            {
+                method:"POST",
+                body:formData
+            }
+        );
+
+        const text = await response.text();
+
+        let data;
+
+        try{
+
+            data = JSON.parse(text);
+
+        }catch(err){
+
+            errorDiv.innerHTML =
+                "Server Error. Check Colab logs.";
+
+            console.log(text);
+
+            button.innerHTML =
+                "Screen Resumes";
+
+            return;
+        }
+
+        if(data.error){
+
+            errorDiv.innerHTML = data.error;
+
+            button.innerHTML =
+                "Screen Resumes";
+
+            return;
+        }
+
+        renderResults(data.results);
+
+        button.innerHTML =
+            "Screen Resumes";
+
+    }
+
+    catch(error){
+
+        console.log(error);
+
+        errorDiv.innerHTML =
+            "Network Error.";
+
+        button.innerHTML =
+            "Screen Resumes";
+    }
+}
+
+function renderResults(items){
+
+    const resultsDiv =
+        document.getElementById("results");
+
+    let html = `
+
+        <div class="results-title">
+            Screening Results
+        </div>
+
+    `;
+
+    items.forEach(item => {
+
+        let badgeClass = "rejected";
+
+        if(item.verdict === "Shortlisted")
+            badgeClass = "shortlisted";
+
+        else if(item.verdict === "Maybe")
+            badgeClass = "maybe";
+
+        html += `
+
+        <div class="result-card">
+
+            <div class="top-row">
+
+                <div>
+
+                    <div class="candidate-name">
+                        ${item.candidate}
+                    </div>
+
+                    <div class="meta">
+                        ${item.matched_count}
+                        skills matched
+                    </div>
+
+                </div>
+
+                <div class="score">
+                    ${item.score}%
+                </div>
+
+            </div>
+
+            <div class="badge ${badgeClass}">
+                ${item.verdict}
+            </div>
+
+            ${
+                item.verdict === "Rejected"
+
+                ?
+
+                `
+                <div class="skill-box">
+
+                    <b>Missing Skills:</b><br>
+
+                    ${item.missing_skills.join(", ")}
+
+                </div>
+                `
+
+                :
+
+                `
+                <div class="skill-box">
+
+                    <b>Matched Skills:</b><br>
+
+                    ${item.matched_skills.join(", ")}
+
+                </div>
+                `
+            }
+
+        </div>
+        `;
+    });
+
+    resultsDiv.innerHTML = html;
+}
+
+</script>
+
+</body>
+</html>
+
+""")
+
+# FLASK APP
+
+app = Flask(__name__)
+
+# JOB DESCRIPTION
+
+JD = """
+
+Machine Learning Engineer
+
+Skills:
+
+Python
+PyTorch
+TensorFlow
+Scikit-learn
+NumPy
+Pandas
+Matplotlib
+CNN
+RNN
+LSTM
+Transformers
+BERT
+GPT
+Docker
+Kubernetes
+FastAPI
+Flask
+SQL
+Spark
+Kafka
+Git
+Linux
+REST APIs
+
+"""
+
+# REQUIRED SKILLS
+
+REQUIRED_SKILLS = [
+
+    "Python",
+    "PyTorch",
+    "TensorFlow",
+    "Scikit-learn",
+    "NumPy",
+    "Pandas",
+    "Matplotlib",
+    "CNN",
+    "RNN",
+    "LSTM",
+    "Transformers",
+    "BERT",
+    "GPT",
+    "Docker",
+    "Kubernetes",
+    "FastAPI",
+    "Flask",
+    "SQL",
+    "Spark",
+    "Kafka",
+    "Git",
+    "Linux",
+    "REST APIs"
+
+]
+
+# LOAD MODEL
+
+print("Loading model...")
+
+model = SentenceTransformer(
+    "all-MiniLM-L6-v2"
+)
+
+JD_VEC = model.encode(
+    JD,
+    convert_to_tensor=True
+)
+
+print("Model loaded.")
+
+# EXTRACT TEXT
+
+def extract_text(file_storage):
+
+    try:
+
+        file_storage.stream.seek(0)
+
+        text = ""
+
+        with pdfplumber.open(
+            file_storage.stream
+        ) as pdf:
+
+            for page in pdf.pages:
+
+                page_text = page.extract_text()
+
+                if page_text:
+
+                    text += page_text + "\\n"
+
+        return text.strip()
+
+    except Exception as e:
+
+        print("PDF ERROR:", str(e))
+
+        return ""
+
+# ANALYZE SKILLS
+
+def analyze_skills(resume_text):
+
+    normalized_resume = re.sub(
+        r'[^a-zA-Z0-9 ]',
+        ' ',
+        resume_text.lower()
+    )
+
+    matched_skills = []
+
+    missing_skills = []
+
+    for skill in REQUIRED_SKILLS:
+
+        normalized_skill = re.sub(
+            r'[^a-zA-Z0-9 ]',
+            ' ',
+            skill.lower()
+        )
+
+        if normalized_skill in normalized_resume:
+
+            matched_skills.append(skill)
+
+        else:
+
+            missing_skills.append(skill)
+
+    return matched_skills, missing_skills
+
+
+# VERDICT
+
+def verdict(score, matched_count):
+
+    if score >= 55 and matched_count >= 5:
+
+        return "Shortlisted"
+
+    elif score >= 45:
+
+        return "Maybe"
+
+    return "Rejected"
+
+# HOME ROUTE
+
+@app.route("/")
+def home():
+
+    return render_template("index.html")
+
+# SCREEN ROUTE
+
+@app.route("/screen", methods=["POST"])
+def screen():
+
+    try:
+
+        files = request.files.getlist("resumes")
+
+        if not files:
+
+            return jsonify({
+                "error":"No files uploaded"
+            })
+
+        results = []
+
+        for f in files:
+
+            try:
+
+                print("Processing:", f.filename)
+
+                text = extract_text(f)
+
+                if not text:
+
+                    results.append({
+
+                        "candidate": f.filename,
+
+                        "score": 0,
+
+                        "verdict": "Rejected",
+
+                        "matched_count": 0,
+
+                        "matched_skills": [],
+
+                        "missing_skills":
+                            REQUIRED_SKILLS[:8]
+
+                    })
+
+                    continue
+
+                resume_vec = model.encode(
+                    text,
+                    convert_to_tensor=True
+                )
+
+                similarity = util.cos_sim(
+                    JD_VEC,
+                    resume_vec
+                )
+
+                score = round(
+                    float(similarity[0][0]) * 100,
+                    1
+                )
+
+                matched_skills, missing_skills = \
+                    analyze_skills(text)
+
+                results.append({
+
+                    "candidate":
+                        os.path.splitext(
+                            f.filename
+                        )[0],
+
+                    "score": score,
+
+                    "verdict":
+                        verdict(
+                            score,
+                            len(matched_skills)
+                        ),
+
+                    "matched_count":
+                        len(matched_skills),
+
+                    "matched_skills":
+                        matched_skills[:8],
+
+                    "missing_skills":
+                        missing_skills[:8]
+
+                })
+
+            except Exception as inner_error:
+
+                print(traceback.format_exc())
+
+        results.sort(
+            key=lambda x: x["score"],
+            reverse=True
+        )
+
+        return jsonify({
+            "results": results
+        })
+
+    except Exception as e:
+
+        print(traceback.format_exc())
+
+        return jsonify({
+            "error": str(e)
+        })
+
+# START SERVER
+
+from google.colab.output import eval_js
+
+def run():
+
+    app.run(
+        port=5000,
+        debug=False,
+        use_reloader=False
+    )
+
+threading.Thread(target=run).start()
+
+print("\nWEBSITE URL:\n")
+
+print(
+    eval_js(
+        "google.colab.kernel.proxyPort(5000)"
+    )
+)
