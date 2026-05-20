@@ -804,8 +804,6 @@ def verdict(score, matched_count):
 
     elif score >= 45:
 
-        return "Maybe"
-
     return "Rejected"
 
 # HOME ROUTE
